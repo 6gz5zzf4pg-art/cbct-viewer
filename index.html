@@ -35,42 +35,19 @@
 
 <div class="cbct" id="cbct">
   <div class="cbct-tabs" role="tablist">
-    <button class="cbct-tab" role="tab" aria-selected="true" data-view="surface">3D reconstruction</button>
-    <button class="cbct-tab" role="tab" aria-selected="false" data-view="volume">Slices &amp; volume</button>
+    <button class="cbct-tab" role="tab" aria-selected="true" data-view="volume">3D cone beam CT</button>
   </div>
 
-  <!-- Surface view -->
-  <section class="cbct-view" data-active data-view="surface">
-    <div class="cbct-stage">
-      <model-viewer id="cbct-mv" src="jaw.glb" alt="3D reconstruction of the upper and lower jaws from a cone beam CT scan"
-        camera-controls touch-action="pan-y" auto-rotate auto-rotate-delay="1500" rotation-per-second="20deg"
-        interaction-prompt="none" shadow-intensity="0.6" exposure="1.05" environment-image="neutral"
-        camera-orbit="0deg 78deg 230mm" min-camera-orbit="auto auto 90mm" max-camera-orbit="auto auto 500mm" field-of-view="30deg">
-        <div slot="poster" class="cbct-loading">Loading 3D model…</div>
-      </model-viewer>
-      <div class="cbct-hint">Drag to rotate · Scroll or pinch to zoom · Right-drag or two-finger drag to pan</div>
-    </div>
-    <div class="cbct-controls">
-      <label><input type="checkbox" id="cbct-bone-on" checked> Bone</label>
-      <label><input type="checkbox" id="cbct-teeth-on" checked> Teeth</label>
-      <label>Bone transparency <input type="range" id="cbct-bone-alpha" min="0" max="100" value="0"></label>
-      <button class="cbct-btn" data-cam="front">Front</button>
-      <button class="cbct-btn" data-cam="left">Left</button>
-      <button class="cbct-btn" data-cam="right">Right</button>
-      <button class="cbct-btn" data-cam="top">Top</button>
-      <button class="cbct-btn" data-cam="bottom">Bottom</button>
-    </div>
-  </section>
-
   <!-- Volume view -->
-  <section class="cbct-view" data-view="volume">
+  <section class="cbct-view" data-active data-view="volume">
     <div class="cbct-stage" id="cbct-nv-stage">
       <canvas id="cbct-nv"></canvas>
       <div class="cbct-loading" id="cbct-nv-loading">Loading scan data (about 12 MB)…</div>
+      <div class="cbct-hint">Drag to rotate · Scroll or pinch to zoom · Use the layout buttons for slices</div>
     </div>
     <div class="cbct-controls">
-      <label><input type="radio" name="cbct-layout" value="multi" checked> Slices + 3D</label>
-      <label><input type="radio" name="cbct-layout" value="render"> 3D only</label>
+      <label><input type="radio" name="cbct-layout" value="render" checked> 3D only</label>
+      <label><input type="radio" name="cbct-layout" value="multi"> Slices + 3D</label>
       <label><input type="radio" name="cbct-layout" value="axial"> Axial</label>
       <label><input type="radio" name="cbct-layout" value="coronal"> Coronal</label>
       <label><input type="radio" name="cbct-layout" value="sagittal"> Sagittal</label>
@@ -85,50 +62,17 @@
 </div>
 
 <script type="module">
-  import "https://cdn.jsdelivr.net/npm/@google/model-viewer@4/dist/model-viewer.min.js";
   import { Niivue, SLICE_TYPE, SHOW_RENDER } from "https://cdn.jsdelivr.net/npm/@niivue/niivue@0.57.0/dist/index.js";
 
   const root = document.getElementById("cbct");
-  const ASSETS = { glb: "jaw.glb", volume: "jaw_volume.nii.gz" };
+  const ASSETS = { volume: "jaw_volume.nii.gz" };
 
   /* ---------- iframe auto-height (used by the Squarespace embed) ---------- */
   const postHeight = () => { try { window.parent !== window && window.parent.postMessage({ cbctHeight: root.getBoundingClientRect().height + 32 }, "*"); } catch (e) {} };
   new ResizeObserver(postHeight).observe(root); window.addEventListener("load", postHeight);
 
-  /* ---------- tabs ---------- */
+  /* ---------- tabs (single view now) ---------- */
   let nvStarted = false;
-  root.querySelectorAll(".cbct-tab").forEach(btn => btn.addEventListener("click", () => {
-    root.querySelectorAll(".cbct-tab").forEach(b => b.setAttribute("aria-selected", b === btn));
-    root.querySelectorAll(".cbct-view").forEach(v => v.toggleAttribute("data-active", v.dataset.view === btn.dataset.view));
-    if (btn.dataset.view === "volume" && !nvStarted) { nvStarted = true; startVolume(); }
-    if (btn.dataset.view === "volume" && nv) nv.resizeListener();
-    postHeight();
-  }));
-
-  /* ---------- surface view ---------- */
-  const mv = document.getElementById("cbct-mv");
-  const mats = {};
-  mv.addEventListener("load", () => {
-    for (const m of mv.model.materials) mats[m.name] = m;
-    mv.autoRotate = true;
-  });
-  const setVisible = (name, on) => { const m = mats[name]; if (!m) return; m.setAlphaMode(on ? "OPAQUE" : "BLEND"); m.pbrMetallicRoughness.setBaseColorFactor(on ? colorOf(name, 1) : colorOf(name, 0)); };
-  const colorOf = (name, a) => name === "bone" ? [0.93, 0.87, 0.76, a] : [0.98, 0.97, 0.93, a];
-  const boneOn = document.getElementById("cbct-bone-on"), teethOn = document.getElementById("cbct-teeth-on"), boneAlpha = document.getElementById("cbct-bone-alpha");
-  function applyBone() {
-    const m = mats.bone; if (!m) return;
-    if (!boneOn.checked) { m.setAlphaMode("BLEND"); m.pbrMetallicRoughness.setBaseColorFactor(colorOf("bone", 0)); return; }
-    const a = 1 - boneAlpha.value / 100;
-    m.setAlphaMode(a < 1 ? "BLEND" : "OPAQUE");
-    m.pbrMetallicRoughness.setBaseColorFactor(colorOf("bone", a));
-  }
-  boneOn.addEventListener("change", applyBone);
-  boneAlpha.addEventListener("input", applyBone);
-  teethOn.addEventListener("change", () => setVisible("teeth", teethOn.checked));
-  // theta 0 = camera in front of the patient (+z); +90 = camera on the patient's left (+x)
-  const cams = { front: "0deg 78deg 230mm", left: "90deg 80deg 230mm", right: "-90deg 80deg 230mm", top: "0deg 0deg 230mm", bottom: "0deg 180deg 230mm" };
-  root.querySelectorAll("[data-cam]").forEach(b => b.addEventListener("click", () => { mv.autoRotate = false; mv.resetTurntableRotation(0); mv.cameraOrbit = cams[b.dataset.cam]; mv.cameraTarget = "auto auto auto"; }));
-  mv.addEventListener("camera-change", e => { if (e.detail.source === "user-interaction") mv.autoRotate = false; });
 
   /* ---------- volume view ---------- */
   let nv = null;
@@ -137,8 +81,9 @@
     nv = new Niivue({ backColor: [0.07, 0.08, 0.1, 1], show3Dcrosshair: true, isColorbar: false, dragAndDropEnabled: false, isOrientCube: false, multiplanarShowRender: SHOW_RENDER.ALWAYS });
     await nv.attachToCanvas(document.getElementById("cbct-nv"));
     await nv.loadVolumes([{ url: ASSETS.volume, colormap: "gray", opacity: 1 }]);
-    nv.setSliceType(SLICE_TYPE.MULTIPLANAR);
+    nv.setSliceType(SLICE_TYPE.RENDER);
     nv.setVolumeRenderIllumination(0.7);
+    nv.setRenderAzimuthElevation(120, 15);
     nv.setClipPlane([2, 0, 0]);   // no clipping (depth beyond the volume)
     applyThreshold();
     document.getElementById("cbct-nv-loading").style.display = "none";
@@ -150,6 +95,7 @@
     nv.updateGLVolume();
   }
   thresh.addEventListener("input", applyThreshold);
+  nvStarted = true; startVolume();
   root.querySelectorAll('input[name="cbct-layout"]').forEach(r => r.addEventListener("change", () => {
     if (!nv) return;
     const t = { multi: SLICE_TYPE.MULTIPLANAR, render: SLICE_TYPE.RENDER, axial: SLICE_TYPE.AXIAL, coronal: SLICE_TYPE.CORONAL, sagittal: SLICE_TYPE.SAGITTAL }[r.value];
